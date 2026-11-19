@@ -50,12 +50,14 @@ jobs:
           go vet ./...
           mkdir -p package assets
           cp bin/tk skills/tk/SKILL.md LICENSE package/
+          cp "$(go env GOROOT)/LICENSE" package/LICENSE-Go
+          cp "$(go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3)/LICENSE" package/LICENSE-go-sqlite3
           {
             printf 'Source tag: %s\nSource commit: %s\n' "$RELEASE_TAG" "$(git rev-parse HEAD)"
             go version -m bin/tk
           } > package/BUILD-INFO.txt
           archive="assets/tk-$RELEASE_TAG-$(go env GOOS)-$(go env GOARCH).tar.gz"
-          tar -czf "$archive" -C package tk SKILL.md LICENSE BUILD-INFO.txt
+          tar -czf "$archive" -C package tk SKILL.md LICENSE LICENSE-Go LICENSE-go-sqlite3 BUILD-INFO.txt
           smoke_dir=$(mktemp -d)
           tar -xzf "$archive" -C "$smoke_dir"
           export TK_FILE="$smoke_dir/tasks.db"
