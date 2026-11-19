@@ -1,0 +1,106 @@
+name: Release assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-assets-${{ inputs.tag }}
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+  CGO_ENABLED: '1'
+  GOTELEMETRY: 'off'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Validate release tag
+        run: '[[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: stable
+          cache: false
+      - name: Build and package
+        id: package
+        shell: bash
+        run: |
+          make -B
+          go mod verify
+          go vet ./...
+          mkdir -p package assets
+          cp bin/tk skills/tk/SKILL.md LICENSE package/
+          {
+            printf 'Source tag: %s\nSource commit: %s\n' "$RELEASE_TAG" "$(git rev-parse HEAD)"
+            go version -m bin/tk
+          } > package/BUILD-INFO.txt
+          archive="assets/tk-$RELEASE_TAG-$(go env GOOS)-$(go env GOARCH).tar.gz"
+          tar -czf "$archive" -C package tk SKILL.md LICENSE BUILD-INFO.txt
+          smoke_dir=$(mktemp -d)
+          tar -xzf "$archive" -C "$smoke_dir"
+          export TK_FILE="$smoke_dir/tasks.db"
+          id=$("$smoke_dir/tk" add 'Verify the release' tags=release)
+          "$smoke_dir/tk" --json list tag=release | grep -F 'Verify the release'
+          "$smoke_dir/tk" done "$id"
+          printf 'archive=%s\n' "$archive" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: ${{ steps.package.outputs.archive }}
+      - name: Scan Go dependencies
+        if: matrix.runner == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          export GOBIN="$RUNNER_TEMP/tk-tools"
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          {
+            printf 'Source tag: %s\nSource commit: %s\n' "$RELEASE_TAG" "$(git rev-parse HEAD)"
+            go version
+            go mod verify
+            "$GOBIN/govulncheck" -show=verbose ./...
+            printf '\nScope: Go code and standard library. The SQLite C library and host agent are outside this scan.\n'
+          } 2>&1 | tee assets/govulncheck.txt
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: assets-${{ matrix.runner }}
+          path: assets/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: assets-*
+          merge-multiple: true
+          path: assets
+      - name: Attach archives, checksums, and scan report
+        working-directory: assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum ./*.tar.gz govulncheck.txt > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" ./*.tar.gz SHA256SUMS govulncheck.txt
