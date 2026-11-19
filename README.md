@@ -1,76 +1,53 @@
-# tk — tasks as an outline
+# tk
 
-## Data model
+`tk` is a minimal to-do list for coding agents. Ask your agent to save a follow-up during a coding session, then pick it up in a later one. The list lives in a local SQLite file and is shared by agent sessions that use the same database.
 
-| Kind | Purpose | Allowed parent |
-| --- | --- | --- |
-| Project | A top-level initiative, e.g. *Office move*. | None |
-| Task | A piece of work. A subtask is just a task with a task as its parent. | None, one project, or one task |
-| Inbox item | Text to review later. No filing decisions at capture. | None until filed as a task |
+## What you can do
 
-**Project membership follows the outline.** Follow a task’s parents to the root: if the root is a project, the whole branch belongs to it. If the root is a task, the branch has no project. Tasks can nest to any depth. Moving a task moves its branch; you cannot move it under itself or a descendant.
+| Use | How it helps |
+| --- | --- |
+| **Inbox** | Capture a loose idea or follow-up while you’re working. File it as a task or project when you know where it belongs. |
+| **Projects and subtasks** | Group related work and break a task into smaller steps. Every item has a stable ID, so the agent can refer to it again after a move or rename. |
+| **Tags** | Keep a view of work across projects, such as `release` or `follow-up`, and see how many unfinished tasks use each tag. |
+| **Notes** | Keep links, decisions, and handoff details with the task while keeping the title short. |
+| **Next actions** | Mark what to do next, what’s blocked, and what’s delegated. Add a priority, planned date, or deadline when it helps. |
 
-Each item has a stable ID within its list, a title, and one state: `open` (default), `next`, `blocked`, `delegated`, or `done`. Completing a parent does not complete its children.
+## Install on Linux or macOS
 
-Optional details: `priority` (`1` high to `3` low), `when` (planned work date), `due` (deadline), and ordered free-text notes for links, blockers, or a delegate’s name. Dates use `YYYY-MM-DD`. Clear an optional field with `priority=`, `when=`, or `due=`.
+You’ll need Make, Go 1.22 or later, and a C compiler. Use GCC or Clang on Linux, or the Xcode Command Line Tools on macOS. SQLite is bundled.
 
-## Build an outline
-
-Starting with an empty list, these commands create the outline below. Writes print the affected ID.
-
-```sh
-tk project "Office move"                  # 1
-tk add "Move the network"                 # 2 — starts without a project
-tk add "Pack the router" parent=2         # 3
-tk add "Label the cables" parent=3        # 4
-tk set 2 parent=1                         # attach the whole branch to Office move
-tk add "Submit expenses"                  # 5 — stays independent
-```
-
-```org
-* Office move                 (project 1)
-** Move the network           (task 2)
-*** Pack the router           (task 3)
-**** Label the cables         (task 4)
-* Submit expenses             (task 5)
-```
-
-To browse one level, `tk list 2` shows immediate **unfinished** children: task 3, not task 4. `tk list 3` shows task 4. To take the network branch out of the project, use `tk set 2 parent=`; tasks 3 and 4 stay nested under it.
-
-## Capture, review, act
+From the repository root, run
 
 ```sh
-tk inbox "Ask Mei about access to the new office"       # 6; or use `tk inbox -` for stdin
-tk list inbox
-tk set 6 kind=task parent=1 "title=Confirm key pickup" state=next
-tk note 6 "Mei is at the front desk after 09:00."
-tk set 6 when=2028-04-03 due=2028-04-05 priority=1
-tk list next
-tk show 6                                               # full item with notes
-tk done 6
+make install-skill
 ```
 
-Filing keeps the capture’s ID. Retitle it in the same command and the original text becomes a note. Omit `parent` when filing for a standalone task, or use `kind=project` for a new initiative. To reopen an item, use `tk set ID state=open`.
+This installs `tk` to `~/.local/bin/tk` and adds the skill for Claude Code, Codex, or Pi when their CLI is on `PATH` or in `~/.local/bin`. It preserves existing skill files. If your agent isn’t detected, use the workspace setup below. Restart your agent after installation.
 
-`tk list` shows all unfinished work. Other views: `inbox`, `project`, `next`, `blocked`, `delegated`, `done`, `all`, or a parent ID. For skills, put `--json` first: `tk --json list all` returns an array with parent IDs where present; `tk --json add "Review draft"` returns the new item. Errors go to stderr with a nonzero exit status.
+## A typical session
 
-## Review work by tag
+1. **Capture a follow-up while you work.** “Add ‘confirm the rollback plan’ to my inbox.”
+2. **File it when you’re ready.** “Move that item under Launch, tag it `release`, and mark it next.”
+3. **Leave context for later.** “Add a note that the rollback steps are in the deploy runbook.”
+4. **Pick it back up in a new session.** “Show my next actions tagged `release`.”
 
-Any item can have flat tags; children do not inherit them. Use comma-separated names such as `office,follow-up` (letters `a-z`, digits, `-`, `_`; start with a letter or digit). Names are lowercased and duplicates count once.
+## Use a different list
 
-```sh
-tk add "Return spare keys" tags=office,errand
-tk set 5 tags=office,finance   # replace all tags on item 5; tags= clears them
-tk tags                        # each tag, then its unfinished task count
-tk list tag=office             # the tasks behind that count
-```
+The default database is `tk/tasks.db` under your user config directory. Set `TK_FILE` to an absolute database path in the environment where your agent runs to use a separate list.
 
-`tk tags` lists every attached tag alphabetically. It counts directly tagged **tasks** in `open`, `next`, `blocked`, or `delegated`, even if their parent is done. A tag used only on projects, inbox items, or done tasks shows `0`; removing its last use removes it from the report. `tk --json tags` returns rows like `{"tag":"office","count":2}` in an array.
+## Security and offline use
 
-Optional: [install the Markdown skill for Claude Code, Codex, Pi, or Cursor](skills/README.md).
+- **Local and offline.** The `tk` binary makes no internet calls and has no telemetry, account, or sync service. Its only third-party Go dependency is `github.com/mattn/go-sqlite3`, which bundles SQLite. The rest uses the Go standard library.
+- **Air-gapped use.** Build the binary on a trusted machine for the target OS and architecture, then transfer it with the skill file. Runtime use needs no network. To build from source inside the air gap, bring the toolchain, C compiler, and cached Go dependency with you. A first build with an empty cache normally downloads the dependency.
+- **Agent access.** `tk` stores task text locally. When an agent reads a task, the text enters the agent’s context and is handled according to that agent’s settings. Use a local agent and model if task text must stay inside the air gap.
 
-## Build and choose a list
+## Set up the skill in one workspace
 
-On Linux and macOS, use Go 1.22+ and a C compiler (GCC or Clang on Linux, Xcode Command Line Tools on macOS). Run `make` to test and build `bin/tk`, or `make install` to install it to `~/.local/bin`. No separate SQLite installation is needed.
+Run `make install` to install the binary. Copy the skill file to the workspace path for your agent. [Skill file](skills/tk/SKILL.md)
 
-Put the binary on `PATH` for the examples above. By default, `tk` uses `tk/tasks.db` under your user config directory. For separate work and personal lists, point `TK_FILE` at a different file for each, for example `export TK_FILE="$HOME/work/todos.db"`. The skill pins only the executable path; it does not change how `tk` selects a list.
+| Agent | Workspace path |
+| --- | --- |
+| Claude Code | `.claude/skills/tk/SKILL.md` |
+| Codex, Pi, Cursor | `.agents/skills/tk/SKILL.md` |
+
+Replace `/absolute/path/to/tk` in the copied file with the full path to the installed binary, then restart your agent.
