@@ -2,6 +2,15 @@
 
 `tk` is a minimal to-do list for coding agents. Ask your agent to save a follow-up during a coding session, then pick it up in a later one. The list lives in a local SQLite file and is shared by agent sessions that use the same database.
 
+## Security and offline use
+
+- **No runtime network access.** `tk` makes no internet calls and has no telemetry, account, or sync service. It uses the Go standard library and one third-party Go module, `go-sqlite3` v1.14.53, which bundles SQLite 3.54.1. [Dependencies](go.mod)
+- **Air-gapped operation.** Transfer a trusted binary built for the target OS and architecture, along with the skill file. To build inside the air gap, bring the Go toolchain, C compiler, and cached dependency. A first build with an empty cache normally downloads the dependency.
+- **Agent permissions.** The skill is a single Markdown file. It directs the agent to use an approved absolute path to `tk`, read only what the request needs, write only when asked, and treat task text as data. It uses the agent’s existing permissions and requires no credentials, hooks, or MCP server. [Skill source](skills/tk/SKILL.md)
+- **Task data.** `tk` stores task text in a local SQLite database without application-level encryption. On Linux, a newly created store was verified to use `0600` for the database and `0700` for its directory. The agent host controls whether task text reaches a model provider or logs. Use a local agent and model to keep that text inside the air gap.
+
+**Verification for v0.1.0.** The Linux task workflow passed with networking disabled, and `go mod verify` passed. `govulncheck` v1.7.0 reported no vulnerabilities in the Go code it scanned. That scan did not cover the bundled SQLite C code or the agent host.
+
 ## What you can do
 
 | Use | How it helps |
@@ -34,12 +43,6 @@ This installs `tk` to `~/.local/bin/tk` and adds the skill for Claude Code, Code
 ## Use a different list
 
 The default database is `tk/tasks.db` under your user config directory. Set `TK_FILE` to an absolute database path in the environment where your agent runs to use a separate list.
-
-## Security and offline use
-
-- **Local and offline.** The `tk` binary makes no internet calls and has no telemetry, account, or sync service. Its only third-party Go dependency is `github.com/mattn/go-sqlite3`, which bundles SQLite. The rest uses the Go standard library.
-- **Air-gapped use.** Build the binary on a trusted machine for the target OS and architecture, then transfer it with the skill file. Runtime use needs no network. To build from source inside the air gap, bring the toolchain, C compiler, and cached Go dependency with you. A first build with an empty cache normally downloads the dependency.
-- **Agent access.** `tk` stores task text locally. When an agent reads a task, the text enters the agent’s context and is handled according to that agent’s settings. Use a local agent and model if task text must stay inside the air gap.
 
 ## Set up the skill in one workspace
 
